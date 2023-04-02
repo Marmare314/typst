@@ -1192,7 +1192,62 @@ impl Eval for ast::LetBinding {
             Some(expr) => expr.eval(vm)?,
             None => Value::None,
         };
-        vm.define(self.binding(), value);
+        match self.binding().pattern() {
+            ast::LetBindingKind::Ident(name) => vm.define(name, value),
+            ast::LetBindingKind::Closure(name) => vm.define(name, value),
+            ast::LetBindingKind::Pattern(pat) => {
+                let Ok(value) = value.cast::<Array>() else {
+                    // TODO (Marmare): is this the correct location to bail at?
+                    // bail!(self.span(), "cannot destructure {} into an array", value.type_name());
+                    bail!(self.span(), "cannot destructure into an array");
+                };
+
+                let mut sink = None;
+                for (i, p) in pat.iter().enumerate() {
+                    match p {
+                        ast::PatternKind::Ident(_name) => {}
+                        ast::PatternKind::Anonymous => {}
+                        ast::PatternKind::Spread(name) => {
+                            if sink.is_some() {
+                                bail!(name.span(), "only one argument sink is allowed");
+                            }
+                            sink = Some(i);
+                        }
+                    }
+                }
+
+                let mut i = 0;
+                for p in &pat {
+                    dbg!(p);
+                    match p {
+                        ast::PatternKind::Ident(name) => {
+                            // TODO (Marmare): is this try_into.unwrap fine?
+                            let Ok(v) = value.at(i.try_into().unwrap()) else {
+                                bail!(name.span(), "too many values to unpack");
+                            };
+                            vm.define(name.clone(), v.clone());
+                        }
+                        ast::PatternKind::Spread(name) => {
+                            let Some(sink) = sink else {
+                                bail!(name.span(), "internal error: no sink found");
+                            };
+
+                            let sink_size = pat.len() - sink - 1;
+                            let sink_size: i64 = sink_size.try_into().unwrap();
+                            let v = value.slice(i, Some(i + sink_size));
+                            let Ok(v) = v else {
+                                bail!(name.span(), "not sure yet");
+                            };
+                            i += sink_size;
+
+                            vm.define(name.clone(), Array::from(v.clone()));
+                        }
+                        ast::PatternKind::Anonymous => {}
+                    }
+                    i += 1;
+                }
+            }
+        }
         Ok(Value::None)
     }
 }

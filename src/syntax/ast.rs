@@ -1580,18 +1580,74 @@ impl AstNode for Param {
 }
 
 node! {
+    /// TODO (Marmare): comment
+    Pat
+}
+
+#[derive(Debug, Clone, Hash)]
+pub enum PatternKind { // TODO (Marmare): rename
+    /// An identifier: `x`.
+    Ident(Ident),
+    /// A spread pattern: `..x`.
+    Spread(Ident),
+    /// An anonymous pattern: `_`.
+    Anonymous,
+}
+
+#[derive(Debug, Clone, Hash)]
+pub enum LetBindingKind { // TODO (Marmare): rename BindingPatternKind
+    /// A normal let binding: `let x = 1`.
+    Ident(Ident),
+    /// A pattern binding: `let (x, _, ..y) = (1, 2, 3)`.
+    Pattern(Vec<PatternKind>),
+    /// A closure binding: `let f(x) = 1`.
+    Closure(Ident),
+}
+
+// TODO (Marmare): this type is probably not needed
+impl Pat {
+    pub fn pattern(&self) -> LetBindingKind {
+        match self.0.kind() {
+            SyntaxKind::Ident => self.0.cast_first_match().map(LetBindingKind::Ident).expect("idk"),
+            SyntaxKind::Closure => self.0.cast_first_match().map(LetBindingKind::Closure).expect("idk"),
+            SyntaxKind::Pat => {
+                let mut items = Vec::new();
+                for child in self.0.children() {
+                    match child.kind() {
+                        SyntaxKind::Ident => items.push(PatternKind::Ident(child.cast().unwrap())),
+                        SyntaxKind::Spread => items.push(PatternKind::Spread(child.cast_first_match().unwrap())),
+                        SyntaxKind::Underscore => items.push(PatternKind::Anonymous),
+                        _ => (),
+                    }
+                }
+                LetBindingKind::Pattern(items)
+            }
+            _ => panic!("idk"),
+        }
+        // match self.0.cast_first_match() {
+        //     Some(Expr::Ident(binding)) => LetBindingKind::Ident(binding),
+        //     Some(Expr::Closure(closure)) => LetBindingKind::Closure(closure.name().unwrap_or_default()),
+        //     Some(Pat(pat)) => LetBindingKind::Pattern(pat.items()),
+        //     _ => LetBindingKind::Ident(Ident::default()),
+        // }
+    }
+}
+
+node! {
     /// A let binding: `let x = 1`.
     LetBinding
 }
 
 impl LetBinding {
     /// The binding to assign to.
-    pub fn binding(&self) -> Ident {
-        match self.0.cast_first_match() {
-            Some(Expr::Ident(binding)) => binding,
-            Some(Expr::Closure(closure)) => closure.name().unwrap_or_default(),
-            _ => Ident::default(),
-        }
+    pub fn binding(&self) -> Pat {
+        self.0.cast_first_match().unwrap_or_default()
+        // match self.0.cast_first_match() {
+        //     Some(Expr::Ident(binding)) => LetBindingKind::Ident(binding),
+        //     Some(Expr::Closure(closure)) => LetBindingKind::Closure(closure.name().unwrap_or_default()),
+        //     Some(Pat(pat)) => LetBindingKind::Pattern(pat.items()),
+        //     _ => LetBindingKind::Ident(Ident::default()),
+        // }
     }
 
     /// The expression the binding is initialized with.

@@ -436,10 +436,11 @@ impl<'a> CapturesVisitor<'a> {
             // A let expression contains a binding, but that binding is only
             // active after the body is evaluated.
             Some(ast::Expr::Let(expr)) => {
-                if let Some(init) = expr.init() {
-                    self.visit(init.as_untyped());
-                }
-                self.bind(expr.binding());
+                // TODO (Marmare): implement
+                // if let Some(init) = expr.init() {
+                //     self.visit(init.as_untyped());
+                // }
+                // self.bind(expr.binding());
             }
 
             // A for loop contains one or two bindings in its pattern. These are

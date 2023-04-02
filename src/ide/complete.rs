@@ -1093,10 +1093,11 @@ impl<'a> CompletionContext<'a> {
         while let Some(node) = &ancestor {
             let mut sibling = Some(node.clone());
             while let Some(node) = &sibling {
-                if let Some(v) = node.cast::<ast::LetBinding>() {
-                    defined.insert(v.binding().take());
-                }
-                sibling = node.prev_sibling();
+                // TODO (Marmare): implement
+                // if let Some(v) = node.cast::<ast::LetBinding>() {
+                //     defined.insert(v.binding().take());
+                // }
+                // sibling = node.prev_sibling();
             }
 
             if let Some(parent) = node.parent() {

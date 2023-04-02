@@ -244,6 +244,8 @@ pub enum SyntaxKind {
     LoopContinue,
     /// A return from a function: `return`, `return x + 1`.
     FuncReturn,
+    /// A pattern in a local binding: `(x, _, ..y)`.
+    Pat,
 
     /// A line comment: `// ...`.
     LineComment,
@@ -430,6 +432,7 @@ impl SyntaxKind {
             Self::LoopBreak => "`break` expression",
             Self::LoopContinue => "`continue` expression",
             Self::FuncReturn => "`return` expression",
+            Self::Pat => "`pattern` expression",
             Self::LineComment => "line comment",
             Self::BlockComment => "block comment",
             Self::Error => "syntax error",

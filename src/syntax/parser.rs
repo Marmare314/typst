@@ -837,15 +837,24 @@ fn let_binding(p: &mut Parser) {
     let m = p.marker();
     p.assert(SyntaxKind::Let);
 
+    // TODO (Marmare): should let (x) = 3 be allowed?
+    let mut closure = false;
+    let unpacking = p.at(SyntaxKind::LeftParen);
     let m2 = p.marker();
-    p.expect(SyntaxKind::Ident);
-
-    let closure = p.directly_at(SyntaxKind::LeftParen);
-    if closure {
-        let m3 = p.marker();
+    if unpacking {
         collection(p, false);
-        validate_params(p, m3);
-        p.wrap(m3, SyntaxKind::Params);
+        validate_unpacking(p, m2);
+        p.wrap(m2, SyntaxKind::Pat);
+    } else {
+        p.expect(SyntaxKind::Ident);
+
+        closure = p.directly_at(SyntaxKind::LeftParen);
+        if closure {
+            let m3 = p.marker();
+            collection(p, false);
+            validate_params(p, m3);
+            p.wrap(m3, SyntaxKind::Params);
+        }
     }
 
     let f = if closure { Parser::expect } else { Parser::eat_if };
@@ -1085,6 +1094,37 @@ fn validate_args(p: &mut Parser, m: Marker) {
         }
     }
 }
+
+fn validate_unpacking(p: &mut Parser, m: Marker) {
+    let mut used = HashSet::new();
+    for child in p.post_process(m) {
+        match child.kind() {
+            SyntaxKind::Ident => {
+                if !used.insert(child.text().clone()) {
+                    child.convert_to_error("duplicate identifier");
+                }
+            }
+            SyntaxKind::Spread => {
+                let Some(within) = child.children_mut().last_mut() else { continue };
+                if within.kind() != SyntaxKind::Ident {
+                    within.convert_to_error(eco_format!(
+                        "expected identifier, found {}",
+                        within.kind().name(),
+                    ));
+                    child.make_erroneous();
+                }
+            }
+            SyntaxKind::LeftParen | SyntaxKind::RightParen | SyntaxKind::Comma => {}
+            kind => {
+                child.convert_to_error(eco_format!(
+                    "expected identifier or argument sink, found {}", // TODO (Marmare): better message
+                    kind.name()
+                ));
+            }
+        }
+    }
+}
+
 
 /// Manages parsing of a stream of tokens.
 struct Parser<'s> {

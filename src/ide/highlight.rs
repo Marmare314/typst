@@ -246,6 +246,7 @@ pub fn highlight(node: &LinkedNode) -> Option<Tag> {
         SyntaxKind::LoopBreak => None,
         SyntaxKind::LoopContinue => None,
         SyntaxKind::FuncReturn => None,
+        SyntaxKind::Pat => None,
 
         SyntaxKind::LineComment => Some(Tag::Comment),
         SyntaxKind::BlockComment => Some(Tag::Comment),
