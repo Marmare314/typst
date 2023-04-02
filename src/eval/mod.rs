@@ -1192,7 +1192,7 @@ impl Eval for ast::LetBinding {
             Some(expr) => expr.eval(vm)?,
             None => Value::None,
         };
-        match self.binding().pattern() {
+        match self.binding() {
             ast::LetBindingKind::Ident(name) => vm.define(name, value),
             ast::LetBindingKind::Closure(name) => vm.define(name, value),
             ast::LetBindingKind::Pattern(pat) => {
@@ -1202,49 +1202,34 @@ impl Eval for ast::LetBinding {
                     bail!(self.span(), "cannot destructure into an array");
                 };
 
-                let mut sink = None;
-                for (i, p) in pat.iter().enumerate() {
-                    match p {
-                        ast::PatternKind::Ident(_name) => {}
-                        ast::PatternKind::Anonymous => {}
-                        ast::PatternKind::Spread(name) => {
-                            if sink.is_some() {
-                                bail!(name.span(), "only one argument sink is allowed");
-                            }
-                            sink = Some(i);
-                        }
-                    }
-                }
-
-                let mut i = 0;
+                let mut i: i64 = 0;
                 for p in &pat {
                     dbg!(p);
                     match p {
                         ast::PatternKind::Ident(name) => {
                             // TODO (Marmare): is this try_into.unwrap fine?
                             let Ok(v) = value.at(i.try_into().unwrap()) else {
-                                bail!(name.span(), "too many values to unpack");
+                                bail!(name.span(), "not enough values to unpack");
                             };
                             vm.define(name.clone(), v.clone());
                         }
                         ast::PatternKind::Spread(name) => {
-                            let Some(sink) = sink else {
-                                bail!(name.span(), "internal error: no sink found");
-                            };
-
-                            let sink_size = pat.len() - sink - 1;
-                            let sink_size: i64 = sink_size.try_into().unwrap();
+                            let sink_size = i64::try_from(value.len()).unwrap() - i64::try_from(pat.len()).unwrap() + 1;
+                            dbg!(i, sink_size);
                             let v = value.slice(i, Some(i + sink_size));
                             let Ok(v) = v else {
                                 bail!(name.span(), "not sure yet");
                             };
-                            i += sink_size;
+                            i += sink_size - 1;
 
                             vm.define(name.clone(), Array::from(v.clone()));
                         }
                         ast::PatternKind::Anonymous => {}
                     }
                     i += 1;
+                }
+                if i < pat.len().try_into().unwrap() {
+                    bail!(self.span(), "not enough values to unpack");
                 }
             }
         }

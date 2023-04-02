@@ -1594,36 +1594,52 @@ pub enum PatternKind { // TODO (Marmare): rename
     Anonymous,
 }
 
-#[derive(Debug, Clone, Hash)]
-pub enum LetBindingKind { // TODO (Marmare): rename BindingPatternKind
-    /// A normal let binding: `let x = 1`.
-    Ident(Ident),
-    /// A pattern binding: `let (x, _, ..y) = (1, 2, 3)`.
-    Pattern(Vec<PatternKind>),
-    /// A closure binding: `let f(x) = 1`.
-    Closure(Ident),
-}
-
 // TODO (Marmare): this type is probably not needed
 impl Pat {
-    pub fn pattern(&self) -> LetBindingKind {
-        match self.0.kind() {
-            SyntaxKind::Ident => self.0.cast_first_match().map(LetBindingKind::Ident).expect("idk"),
-            SyntaxKind::Closure => self.0.cast_first_match().map(LetBindingKind::Closure).expect("idk"),
-            SyntaxKind::Pat => {
-                let mut items = Vec::new();
-                for child in self.0.children() {
-                    match child.kind() {
-                        SyntaxKind::Ident => items.push(PatternKind::Ident(child.cast().unwrap())),
-                        SyntaxKind::Spread => items.push(PatternKind::Spread(child.cast_first_match().unwrap())),
-                        SyntaxKind::Underscore => items.push(PatternKind::Anonymous),
-                        _ => (),
+    pub fn pattern(&self) -> Vec<PatternKind> {
+        dbg!(self);
+        let mut items = Vec::new();
+        for child in self.0.children() {
+            match child.kind() {
+                SyntaxKind::Ident => {
+                    if child.text() == "_" {
+                        items.push(PatternKind::Anonymous)
+                    } else {
+                        items.push(PatternKind::Ident(child.cast().unwrap()))
                     }
                 }
-                LetBindingKind::Pattern(items)
+                SyntaxKind::Spread => items.push(PatternKind::Spread(child.cast_first_match().unwrap())),
+                _ => (),
             }
-            _ => panic!("idk"),
         }
+        items
+        // for c in self.0.children() {
+        //     println!("{:?}", c.kind());
+        // }
+        // match self.0.kind() {
+        //     SyntaxKind::Ident => self.0.cast_first_match().map(LetBindingKind::Ident).expect("idk"),
+        //     SyntaxKind::Closure => {
+        //         self.0.cast_first_match().map(LetBindingKind::Closure).expect("idk")
+        //     }
+        //     SyntaxKind::Pat => {
+        //         let mut items = Vec::new();
+        //         for child in self.0.children() {
+        //             match child.kind() {
+        //                 SyntaxKind::Ident => {
+        //                     if child.text() == "_" {
+        //                         items.push(PatternKind::Anonymous)
+        //                     } else {
+        //                         items.push(PatternKind::Ident(child.cast().unwrap()))
+        //                     }
+        //                 }
+        //                 SyntaxKind::Spread => items.push(PatternKind::Spread(child.cast_first_match().unwrap())),
+        //                 _ => (),
+        //             }
+        //         }
+        //         LetBindingKind::Pattern(items)
+        //     }
+        //     _ => LetBindingKind::Ident(Ident::default()),
+        // }
         // match self.0.cast_first_match() {
         //     Some(Expr::Ident(binding)) => LetBindingKind::Ident(binding),
         //     Some(Expr::Closure(closure)) => LetBindingKind::Closure(closure.name().unwrap_or_default()),
@@ -1638,10 +1654,48 @@ node! {
     LetBinding
 }
 
+#[derive(Debug, Clone, Hash)]
+pub enum LetBindingKind { // TODO (Marmare): rename BindingPatternKind
+    /// A normal let binding: `let x = 1`.
+    Ident(Ident),
+    /// A pattern binding: `let (x, _, ..y) = (1, 2, 3)`.
+    Pattern(Vec<PatternKind>),
+    /// A closure binding: `let f(x) = 1`.
+    Closure(Ident),
+}
+
+
 impl LetBinding {
     /// The binding to assign to.
-    pub fn binding(&self) -> Pat {
-        self.0.cast_first_match().unwrap_or_default()
+    pub fn binding(&self) -> LetBindingKind {
+        if let Some(v) = self.0.cast_first_match::<Ident>() {
+            // This is a normal binding like `let x = 1`.
+            LetBindingKind::Ident(v)
+        } else if let Some(v) = self.0.cast_first_match::<Closure>() {
+            // This is a closure binding like `let f(x) = 1`.
+            LetBindingKind::Closure(v.name().unwrap_or_default())
+        } else if let Some(v) = self.0.cast_first_match::<Pat>() {
+            // This is a pattern binding like `let (x, _, ..y) = (1, 2, 3)`.
+            dbg!(self);
+            LetBindingKind::Pattern(v.pattern())
+            // let mut items = Vec::new();
+            // for child in self.0.children() {
+            //     match child.kind() {
+            //         SyntaxKind::Ident => {
+            //             if child.text() == "_" {
+            //                 items.push(PatternKind::Anonymous)
+            //             } else {
+            //                 items.push(PatternKind::Ident(child.cast().unwrap()))
+            //             }
+            //         }
+            //         SyntaxKind::Spread => items.push(PatternKind::Spread(child.cast_first_match().unwrap())),
+            //         _ => (),
+            //     }
+            // }
+            // LetBindingKind::Pattern(items)
+        } else {
+            LetBindingKind::Ident(Ident::default())
+        }
         // match self.0.cast_first_match() {
         //     Some(Expr::Ident(binding)) => LetBindingKind::Ident(binding),
         //     Some(Expr::Closure(closure)) => LetBindingKind::Closure(closure.name().unwrap_or_default()),
