@@ -75,6 +75,19 @@ impl Args {
         }
     }
 
+    /// Returns a `not enough arguments` error if not enough positional arguments
+    /// are left.
+    pub fn consume(&mut self, n: usize) -> SourceResult<EcoVec<Arg>>
+    {
+        if n > self.items.len() {
+            bail!(self.span, "not enough arguments available");
+        }
+        let vec = self.items.to_vec();
+        let (left, right) = vec.split_at(n);
+        self.items = right.into();
+        Ok(left.into())
+    }
+
     /// Find and consume the first castable positional argument.
     pub fn find<T>(&mut self) -> SourceResult<Option<T>>
     where

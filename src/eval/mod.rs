@@ -1150,21 +1150,19 @@ impl Eval for ast::Closure {
         };
 
         let mut params = Vec::new();
-        let mut sink = None;
 
         // Collect parameters and an optional sink parameter.
         for param in self.params().children() {
             match param {
                 ast::Param::Pos(name) => {
-                    params.push((name, None));
+                    params.push(Param::Pos(name));
                 }
                 ast::Param::Named(named) => {
-                    params.push((named.name(), Some(named.expr().eval(vm)?)));
+                    params.push(Param::Named(named.name(), named.expr().eval(vm)?));
                 }
-                ast::Param::Sink(Some(ident)) => {
-                    sink = Some(ident);
+                ast::Param::Sink(name) => {
+                    params.push(Param::Sink(name))
                 }
-                _ => {}
             }
         }
 
@@ -1174,7 +1172,6 @@ impl Eval for ast::Closure {
             name,
             captured,
             params,
-            sink,
             body: self.body(),
         };
 
