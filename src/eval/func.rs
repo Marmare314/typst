@@ -427,7 +427,8 @@ impl<'a> CapturesVisitor<'a> {
                     match param {
                         ast::Param::Pos(ident) => self.bind(ident),
                         ast::Param::Named(named) => self.bind(named.name()),
-                        ast::Param::Sink(ident) => self.bind(ident),
+                        ast::Param::Sink(Some(ident)) => self.bind(ident),
+                        _ => {}
                     }
                 }
 

@@ -1161,12 +1161,10 @@ impl Eval for ast::Closure {
                 ast::Param::Named(named) => {
                     params.push((named.name(), Some(named.expr().eval(vm)?)));
                 }
-                ast::Param::Sink(name) => {
-                    if sink.is_some() {
-                        bail!(name.span(), "only one argument sink is allowed");
-                    }
-                    sink = Some(name);
+                ast::Param::Sink(Some(ident)) => {
+                    sink = Some(ident);
                 }
+                _ => {}
             }
         }
 
