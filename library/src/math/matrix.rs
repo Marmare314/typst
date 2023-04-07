@@ -91,7 +91,7 @@ pub struct MatElem {
         let mut rows = vec![];
         let mut width = 0;
 
-        let values = args.expectall::<Spanned<Value>>()?;
+        let values = args.all::<Spanned<Value>>()?;
         if values.iter().all(|spanned| matches!(spanned.v, Value::Content(_))) {
             rows = vec![values.into_iter().map(|spanned| spanned.v.display()).collect()];
         } else {

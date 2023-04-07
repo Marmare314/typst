@@ -111,7 +111,14 @@ fn create(func: &Func) -> TokenStream {
         body,
         ..
     } = func;
-    let handlers = params.iter().filter(|param| !param.external).map(create_param_parser);
+    let mut remaining_positionals = params.iter().filter(|p| !p.named).count();
+    let handlers = params.iter().filter(|param| !param.external).map(|param| {
+        let parser = create_param_parser(param, remaining_positionals);
+        if !param.named {
+            remaining_positionals -= 1;
+        }
+        parser
+    });
     let params = params.iter().map(create_param_info);
     quote! {
         #[doc = #docs]
@@ -163,11 +170,11 @@ fn create_param_info(param: &Param) -> TokenStream {
 }
 
 /// Create argument parsing code for a parameter.
-fn create_param_parser(param: &Param) -> TokenStream {
+fn create_param_parser(param: &Param, remaining_positionals: usize) -> TokenStream {
     let Param { name, ident, ty, .. } = param;
 
     let mut value = if param.variadic {
-        quote! { args.expectall()? }
+        quote! { args.expect_sink(#remaining_positionals - 1, #name)? }
     } else if param.named {
         quote! { args.named(#name)? }
     } else if param.default.is_some() {

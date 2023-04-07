@@ -75,6 +75,19 @@ impl Args {
         }
     }
 
+    pub fn expect_sink<T>(&mut self, num_params: usize, what: &str) -> SourceResult<Vec<T>>
+    where
+        T: Cast<Spanned<Value>>,
+    {
+        let sink_size = self.argc().checked_sub(num_params).unwrap_or(0);
+
+        let mut list = vec![];
+        for _ in 0..sink_size {
+            list.push(self.expect(what)?);
+        }
+        Ok(list)
+    }
+
     /// Find and consume the first castable positional argument.
     pub fn find<T>(&mut self) -> SourceResult<Option<T>>
     where
@@ -90,14 +103,14 @@ impl Args {
         Ok(None)
     }
 
-    /// Consume and cast all positional argument.
-    pub fn expectall<T>(&mut self) -> SourceResult<Vec<T>>
+    /// Find and consume all castable positional arguments.
+    pub fn all<T>(&mut self) -> SourceResult<Vec<T>>
     where
         T: Cast<Spanned<Value>>,
     {
         let mut list = vec![];
-        while self.items.len() > 0 {
-            list.push(self.expect("")?);
+        while let Some(value) = self.find()? {
+            list.push(value);
         }
         Ok(list)
     }
@@ -150,6 +163,15 @@ impl Args {
             bail!(arg.span, "unexpected argument");
         }
         Ok(())
+    }
+
+    // Return the number of positional arguments.
+    pub fn argc(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| item.name.is_none())
+            .map(|item| item.value.v.clone())
+            .count()
     }
 
     /// Extract the positional arguments as an array.

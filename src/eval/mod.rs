@@ -1056,7 +1056,7 @@ impl Eval for ast::FuncCall {
                 }
             }
             let mut body = Content::empty();
-            for (i, arg) in args.expectall::<Content>()?.into_iter().enumerate() {
+            for (i, arg) in args.all::<Content>()?.into_iter().enumerate() {
                 if i > 0 {
                     body += (vm.items.text)(','.into());
                 }

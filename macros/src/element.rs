@@ -439,6 +439,8 @@ fn create_param_info(field: &Field) -> TokenStream {
 /// Create the element's `Construct` implementation.
 fn create_construct_impl(element: &Elem) -> TokenStream {
     let ident = &element.ident;
+    let mut remaining_required = element.fields.iter().filter(|field| 
+        !field.external && !field.synthesized && (!field.internal || field.parse.is_some()) && field.positional && field.required).count();
     let handlers = element
         .fields
         .iter()
@@ -449,7 +451,10 @@ fn create_construct_impl(element: &Elem) -> TokenStream {
         })
         .map(|field| {
             let push_ident = &field.push_ident;
-            let (prefix, value) = create_field_parser(field);
+            let (prefix, value) = create_field_parser(field, remaining_required);
+            if field.positional && field.required {
+                remaining_required -= 1;
+            }
             if field.settable() {
                 quote! {
                     #prefix
@@ -484,6 +489,8 @@ fn create_construct_impl(element: &Elem) -> TokenStream {
 /// Create the element's `Set` implementation.
 fn create_set_impl(element: &Elem) -> TokenStream {
     let ident = &element.ident;
+    let mut remaining_required = element.fields.iter().filter(|field| 
+        !field.external && !field.synthesized && (!field.internal || field.parse.is_some()) && field.positional && field.required).count();
     let handlers = element
         .fields
         .iter()
@@ -495,7 +502,10 @@ fn create_set_impl(element: &Elem) -> TokenStream {
         })
         .map(|field| {
             let set_ident = &field.set_ident;
-            let (prefix, value) = create_field_parser(field);
+            let (prefix, value) = create_field_parser(field, remaining_required);
+            if field.required {
+                remaining_required -= 1;
+            }
             quote! {
                 #prefix
                 if let Some(value) = #value {
@@ -518,14 +528,17 @@ fn create_set_impl(element: &Elem) -> TokenStream {
 }
 
 /// Create argument parsing code for a field.
-fn create_field_parser(field: &Field) -> (TokenStream, TokenStream) {
+fn create_field_parser(field: &Field, remaining_required: usize) -> (TokenStream, TokenStream) {
     if let Some(FieldParser { prefix, expr }) = &field.parse {
         return (quote! { #(#prefix);* }, quote! { #expr });
     }
 
     let name = &field.name;
     let value = if field.variadic {
-        quote! { args.expectall()? }
+        quote! {
+            { dbg!(#remaining_required);
+            args.expect_sink(#remaining_required - 1, #name)? }
+        }
     } else if field.required {
         quote! { args.expect(#name)? }
     } else if field.positional {
