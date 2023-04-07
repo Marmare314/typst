@@ -90,14 +90,14 @@ impl Args {
         Ok(None)
     }
 
-    /// Find and consume all castable positional arguments.
-    pub fn all<T>(&mut self) -> SourceResult<Vec<T>>
+    /// Consume and cast all positional argument.
+    pub fn expectall<T>(&mut self) -> SourceResult<Vec<T>>
     where
         T: Cast<Spanned<Value>>,
     {
         let mut list = vec![];
-        while let Some(value) = self.find()? {
-            list.push(value);
+        while self.items.len() > 0 {
+            list.push(self.expect("")?);
         }
         Ok(list)
     }

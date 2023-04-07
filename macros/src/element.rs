@@ -525,7 +525,7 @@ fn create_field_parser(field: &Field) -> (TokenStream, TokenStream) {
 
     let name = &field.name;
     let value = if field.variadic {
-        quote! { args.all()? }
+        quote! { args.expectall()? }
     } else if field.required {
         quote! { args.expect(#name)? }
     } else if field.positional {

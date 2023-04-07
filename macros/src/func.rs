@@ -167,7 +167,7 @@ fn create_param_parser(param: &Param) -> TokenStream {
     let Param { name, ident, ty, .. } = param;
 
     let mut value = if param.variadic {
-        quote! { args.all()? }
+        quote! { args.expectall()? }
     } else if param.named {
         quote! { args.named(#name)? }
     } else if param.default.is_some() {
