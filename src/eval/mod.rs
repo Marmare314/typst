@@ -1010,7 +1010,7 @@ impl Eval for ast::FuncCall {
 
         // Try to evaluate as a method call. This is possible if the callee is a
         // field access and does not evaluate to a module.
-        let (callee, mut args) = if let ast::Expr::FieldAccess(access) = callee {
+        let (callee, args) = if let ast::Expr::FieldAccess(access) = callee {
             let target = access.target();
             let field = access.field();
             let field_span = field.span();
@@ -1047,6 +1047,7 @@ impl Eval for ast::FuncCall {
         // Combining accent symbols apply themselves while everything else
         // simply displays the arguments verbatim.
         if in_math && !matches!(callee, Value::Func(_)) {
+            let mut args = ArgsAccessor::new(&args, args.argc());
             if let Value::Symbol(sym) = &callee {
                 let c = sym.get();
                 if let Some(accent) = Symbol::combining_accent(c) {
@@ -1056,7 +1057,7 @@ impl Eval for ast::FuncCall {
                 }
             }
             let mut body = Content::empty();
-            for (i, arg) in args.all::<Content>()?.into_iter().enumerate() {
+            for (i, arg) in args.expectall::<Content>("body")?.into_iter().enumerate() {
                 if i > 0 {
                     body += (vm.items.text)(','.into());
                 }
@@ -1098,15 +1099,16 @@ impl Eval for ast::Args {
                 ast::Arg::Pos(expr) => {
                     items.push(Arg {
                         span,
-                        name: None,
-                        value: Spanned::new(expr.eval(vm)?, expr.span()),
+                        value: ArgValue::Pos(Spanned::new(expr.eval(vm)?, expr.span())),
                     });
                 }
                 ast::Arg::Named(named) => {
                     items.push(Arg {
                         span,
-                        name: Some(named.name().take().into()),
-                        value: Spanned::new(named.expr().eval(vm)?, named.expr().span()),
+                        value: ArgValue::Named(
+                            named.name().take().into(),
+                            Spanned::new(named.expr().eval(vm)?, named.expr().span()),
+                        ),
                     });
                 }
                 ast::Arg::Spread(expr) => match expr.eval(vm)? {
@@ -1114,15 +1116,13 @@ impl Eval for ast::Args {
                     Value::Array(array) => {
                         items.extend(array.into_iter().map(|value| Arg {
                             span,
-                            name: None,
-                            value: Spanned::new(value, span),
+                            value: ArgValue::Pos(Spanned::new(value, span)),
                         }));
                     }
                     Value::Dict(dict) => {
                         items.extend(dict.into_iter().map(|(key, value)| Arg {
                             span,
-                            name: Some(key),
-                            value: Spanned::new(value, span),
+                            value: ArgValue::Named(key, Spanned::new(value, span)),
                         }));
                     }
                     Value::Args(args) => items.extend(args.items),
@@ -1307,6 +1307,7 @@ impl Eval for ast::SetRule {
             })
             .at(target.span())?;
         let args = self.args().eval(vm)?;
+        let args = ArgsAccessor::new(&args, args.argc());
         Ok(target.set(args)?.spanned(self.span()))
     }
 }

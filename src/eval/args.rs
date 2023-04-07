@@ -1,6 +1,6 @@
 use std::fmt::{self, Debug, Formatter};
 
-use ecow::{eco_format, EcoVec};
+use ecow::{eco_format, EcoVec, eco_vec};
 
 use super::{Array, Cast, Dict, Str, Value};
 use crate::diag::{bail, At, SourceResult};
@@ -21,10 +21,16 @@ pub struct Args {
 pub struct Arg {
     /// The span of the whole argument.
     pub span: Span,
-    /// The name of the argument (`None` for positional arguments).
-    pub name: Option<Str>,
     /// The value of the argument.
-    pub value: Spanned<Value>,
+    pub value: ArgValue,
+}
+
+#[derive(Clone, PartialEq, Hash)]
+pub enum ArgValue {
+    /// A positional argument.
+    Pos(Spanned<Value>),
+    /// A named argument.
+    Named(Str, Spanned<Value>),
 }
 
 impl Args {
@@ -32,7 +38,10 @@ impl Args {
     pub fn new(span: Span, values: impl IntoIterator<Item = Value>) -> Self {
         let items = values
             .into_iter()
-            .map(|value| Arg { span, name: None, value: Spanned::new(value, span) })
+            .map(|value| Arg {
+                span,
+                value: ArgValue::Pos(Spanned::new(value, span)),
+            })
             .collect();
         Self { span, items }
     }
@@ -41,9 +50,56 @@ impl Args {
     pub fn push(&mut self, span: Span, value: Value) {
         self.items.push(Arg {
             span: self.span,
-            name: None,
-            value: Spanned::new(value, span),
+            value: ArgValue::Pos(Spanned::new(value, span)),
         })
+    }
+
+    /// Extract the positional arguments as an array.
+    pub fn to_pos(&self) -> Array {
+        self.items
+            .iter()
+            .filter_map(|item| match &item.value {
+                ArgValue::Pos(value) => Some(value.v.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Extract the named arguments as a dictionary.
+    pub fn to_named(&self) -> Dict {
+        self.items
+            .iter()
+            .filter_map(|item| match &item.value {
+                ArgValue::Named(name, value) => Some((name.clone(), value.v.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Extract the positional arguments as an array.
+    pub fn argc(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|item| matches!(item.value, ArgValue::Pos(_)))
+            .count()
+    }
+}
+
+/// Evaluated arguments to a function.
+#[derive(Clone, PartialEq, Hash)]
+pub struct ArgsAccessor {
+    //// The arguments to access.
+    pub args: Args,
+    /// The number of expected positional arguments.
+    pub num_pos_params: usize,
+    /// The arguments that were taken out.
+    pub sink: Args,
+}
+
+impl ArgsAccessor {
+    /// Create accessor for Arguments
+    pub fn new(args: &Args, num_pos_params: usize) -> Self {
+        Self { args: args.clone(), num_pos_params, sink: Args { span: args.span, items: eco_vec![] } }
     }
 
     /// Consume and cast the first positional argument if there is one.
@@ -51,25 +107,13 @@ impl Args {
     where
         T: Cast<Spanned<Value>>,
     {
-        for (i, slot) in self.items.iter().enumerate() {
-            if slot.name.is_none() {
-                let value = self.items.remove(i).value;
-                let span = value.span;
-                return T::cast(value).at(span).map(Some);
+        let pos = self.args.items.iter().position(|arg| matches!(arg.value, ArgValue::Pos(_)));
+        if let Some(pos) = pos {
+            if let ArgValue::Pos(value) = self.args.items.remove(pos).value {
+                return T::cast(value.clone()).at(value.span).map(Some);
             }
         }
         Ok(None)
-    }
-
-    /// Consume n positional arguments if possible.
-    pub fn consume(&mut self, n: usize) -> Option<EcoVec<Arg>> {
-        if n <= self.items.len() {
-            let vec = self.items.to_vec();
-            let (left, right) = vec.split_at(n);
-            self.items = right.into();
-            return Some(left.into());
-        }
-        None
     }
 
     /// Consume and cast the first positional argument.
@@ -82,8 +126,23 @@ impl Args {
     {
         match self.eat()? {
             Some(v) => Ok(v),
-            None => bail!(self.span, "missing argument: {}", what),
+            None => bail!(self.args.span, "missing argument: {}", what),
         }
+    }
+
+    /// Consume and cast the all positional arguments.
+    ///
+    /// Returns a `missing argument: {what}` error if no positional argument is
+    /// left.
+    pub fn expectall<T>(&mut self, what: &str) -> SourceResult<Vec<T>>
+    where
+        T: Cast<Spanned<Value>>,
+    {
+        let mut list = vec![];
+        while !self.args.items.is_empty(){
+            list.push(self.expect(what)?);
+        }
+        Ok(list)
     }
 
     /// Find and consume the first castable positional argument.
@@ -91,26 +150,13 @@ impl Args {
     where
         T: Cast<Spanned<Value>>,
     {
-        for (i, slot) in self.items.iter().enumerate() {
-            if slot.name.is_none() && T::is(&slot.value) {
-                let value = self.items.remove(i).value;
-                let span = value.span;
-                return T::cast(value).at(span).map(Some);
+        let pos = self.args.items.iter().position(|arg| matches!(arg.value, ArgValue::Named(_, _)));
+        if let Some(pos) = pos {
+            if let ArgValue::Named(_, value) = self.args.items.remove(pos).value {
+                return T::cast(value.clone()).at(value.span).map(Some);
             }
         }
         Ok(None)
-    }
-
-    /// Find and consume all castable positional arguments.
-    pub fn all<T>(&mut self) -> SourceResult<Vec<T>>
-    where
-        T: Cast<Spanned<Value>>,
-    {
-        let mut list = vec![];
-        while let Some(value) = self.find()? {
-            list.push(value);
-        }
-        Ok(list)
     }
 
     /// Cast and remove the value for the given named argument, returning an
@@ -123,11 +169,12 @@ impl Args {
         // exist, we want to remove all of them and use the last one.
         let mut i = 0;
         let mut found = None;
-        while i < self.items.len() {
-            if self.items[i].name.as_deref() == Some(name) {
-                let value = self.items.remove(i).value;
-                let span = value.span;
-                found = Some(T::cast(value).at(span)?);
+        while i < self.args.items.len() {
+            if let ArgValue::Named(s, value) = &self.args.items[i].value {
+                if s.as_str() != name {
+                    continue;
+                }
+                found = Some(T::cast(value.clone()).at(value.span)?);
             } else {
                 i += 1;
             }
@@ -146,38 +193,34 @@ impl Args {
         }
     }
 
-    /// Take out all arguments into a new instance.
-    pub fn take(&mut self) -> Self {
-        Self {
-            span: self.span,
-            items: std::mem::take(&mut self.items),
+    pub fn take_sink(&mut self) {
+        if let Some(sink_size) = self.args.argc().checked_sub(self.num_pos_params) {
+            let vec = self.args.items.to_vec();
+            let (left, right) = vec.split_at(sink_size);
+            self.args.items = right.into();
+
+            self.sink.items.extend_from_slice(left);
         }
+    }
+
+    pub fn take_named(&mut self) {
+        let mut list = vec![];
+        for arg in &self.args.items {
+            if let ArgValue::Named(_, _) = arg.value {
+                list.push(arg.clone());
+            }
+        }
+
+        self.sink.items.extend(list);
     }
 
     /// Return an "unexpected argument" error if there is any remaining
     /// argument.
     pub fn finish(self) -> SourceResult<()> {
-        if let Some(arg) = self.items.first() {
+        if let Some(arg) = self.args.items.first() {
             bail!(arg.span, "unexpected argument");
         }
         Ok(())
-    }
-
-    /// Extract the positional arguments as an array.
-    pub fn to_pos(&self) -> Array {
-        self.items
-            .iter()
-            .filter(|item| item.name.is_none())
-            .map(|item| item.value.v.clone())
-            .collect()
-    }
-
-    /// Extract the named arguments as a dictionary.
-    pub fn to_named(&self) -> Dict {
-        self.items
-            .iter()
-            .filter_map(|item| item.name.clone().map(|name| (name, item.value.v.clone())))
-            .collect()
     }
 }
 
@@ -191,10 +234,13 @@ impl Debug for Args {
 
 impl Debug for Arg {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        if let Some(name) = &self.name {
-            f.write_str(name)?;
-            f.write_str(": ")?;
+        match &self.value {
+            ArgValue::Named(name, value) => {
+                f.write_str(&name)?;
+                f.write_str(": ")?;
+                Debug::fmt(&value.v, f)
+            }
+            ArgValue::Pos(value) => Debug::fmt(&value.v, f),
         }
-        Debug::fmt(&self.value.v, f)
     }
 }

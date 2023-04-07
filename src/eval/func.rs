@@ -8,7 +8,8 @@ use comemo::{Prehashed, Track, Tracked, TrackedMut};
 use once_cell::sync::Lazy;
 
 use super::{
-    cast_to_value, Args, CastInfo, Eval, Flow, Route, Scope, Scopes, Tracer, Value, Vm,
+    cast_to_value, Args, ArgsAccessor, CastInfo, Eval, Flow, Route, Scope, Scopes,
+    Tracer, Value, Vm,
 };
 use crate::diag::{bail, SourceResult};
 use crate::model::{ElemFunc, Introspector, StabilityProvider, Vt};
@@ -77,9 +78,7 @@ impl Func {
     pub fn argc(&self) -> Option<usize> {
         match &self.repr {
             Repr::Closure(closure) => closure.argc(),
-            Repr::With(arc) => Some(arc.0.argc()?.saturating_sub(
-                arc.1.items.iter().filter(|arg| arg.name.is_none()).count(),
-            )),
+            Repr::With(arc) => Some(arc.0.argc()?.saturating_sub(arc.1.argc())),
             _ => None,
         }
     }
@@ -88,11 +87,13 @@ impl Func {
     pub fn call_vm(&self, vm: &mut Vm, mut args: Args) -> SourceResult<Value> {
         match &self.repr {
             Repr::Native(native) => {
+                let mut args = ArgsAccessor::new(&args, native.info.argc());
                 let value = (native.func)(vm, &mut args)?;
                 args.finish()?;
                 Ok(value)
             }
             Repr::Elem(func) => {
+                let mut args = ArgsAccessor::new(&args, func.info().argc());
                 let value = func.construct(vm, &mut args)?;
                 args.finish()?;
                 Ok(Value::Content(value))
@@ -180,7 +181,7 @@ impl From<ElemFunc> for Func {
 /// A Typst function defined by a native Rust function.
 pub struct NativeFunc {
     /// The function's implementation.
-    pub func: fn(&mut Vm, &mut Args) -> SourceResult<Value>,
+    pub func: fn(&mut Vm, &mut ArgsAccessor) -> SourceResult<Value>,
     /// Details about the function.
     pub info: Lazy<FuncInfo>,
 }
@@ -235,6 +236,10 @@ impl FuncInfo {
     /// Get the parameter info for a parameter with the given name
     pub fn param(&self, name: &str) -> Option<&ParamInfo> {
         self.params.iter().find(|param| param.name == name)
+    }
+
+    pub fn argc(&self) -> usize {
+        self.params.iter().filter(|p| p.positional).count()
     }
 }
 
@@ -299,7 +304,7 @@ impl Closure {
         provider: TrackedMut<StabilityProvider>,
         introspector: Tracked<Introspector>,
         depth: usize,
-        mut args: Args,
+        args: Args,
     ) -> SourceResult<Value> {
         let closure = match &this.repr {
             Repr::Closure(closure) => closure,
@@ -322,13 +327,11 @@ impl Closure {
         }
 
         // Parse the arguments according to the parameter list.
-        let num_pos_params =
+        let num_expected_pos =
             closure.params.iter().filter(|p| matches!(p, Param::Pos(_))).count();
-        let num_pos_args = args.to_pos().len() as usize;
-        let sink_size = num_pos_args.checked_sub(num_pos_params);
+        let mut args = ArgsAccessor::new(&args, num_expected_pos);
 
         let mut sink = None;
-        let mut sink_pos_values = None;
         for p in &closure.params {
             match p {
                 Param::Pos(ident) => {
@@ -336,13 +339,7 @@ impl Closure {
                 }
                 Param::Sink(ident) => {
                     sink = ident.clone();
-                    if let Some(sink_size) = sink_size {
-                        if let Some(remaining_args) = args.consume(sink_size) {
-                            sink_pos_values = Some(remaining_args);
-                        } else {
-                            // TODO (Marmare): what to do here?!
-                        }
-                    }
+                    args.take_sink();
                 }
                 Param::Named(ident, default) => {
                     let value =
@@ -351,13 +348,10 @@ impl Closure {
                 }
             }
         }
+        args.take_named();
 
         if let Some(sink) = sink {
-            let mut remaining_args = args.take();
-            if let Some(sink_pos_values) = sink_pos_values {
-                remaining_args.items.extend(sink_pos_values);
-            }
-            vm.define(sink, remaining_args);
+            vm.define(sink, args.args.clone());
         }
 
         // Ensure all arguments have been used.

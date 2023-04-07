@@ -2,7 +2,7 @@
 
 use ecow::EcoString;
 
-use super::{Args, Str, Value, Vm};
+use super::{Args, ArgsAccessor, Str, Value, Vm};
 use crate::diag::{At, SourceResult};
 use crate::model::Location;
 use crate::syntax::Span;
@@ -12,12 +12,14 @@ pub fn call(
     vm: &mut Vm,
     value: Value,
     method: &str,
-    mut args: Args,
+    args: Args,
     span: Span,
 ) -> SourceResult<Value> {
     let name = value.type_name();
     let missing = || Err(missing_method(name, method)).at(span);
 
+    // we dont expect any sink here => num_pos_params = args.arc()
+    let mut args = ArgsAccessor::new(&args, args.argc());
     let output = match value {
         Value::Color(color) => match method {
             "lighten" => Value::Color(color.lighten(args.expect("amount")?)),
@@ -130,15 +132,14 @@ pub fn call(
         },
 
         Value::Func(func) => match method {
-            "with" => Value::Func(func.with(args.take())),
+            "with" => Value::Func(func.with(args.args.clone())),
             "where" => {
-                let fields = args.to_named();
-                args.items.retain(|arg| arg.name.is_none());
+                args.take_named();
                 Value::dynamic(
                     func.element()
                         .ok_or("`where()` can only be called on element functions")
                         .at(span)?
-                        .where_(fields),
+                        .where_(args.sink.to_named()),
                 )
             }
             _ => return missing(),
@@ -159,7 +160,7 @@ pub fn call(
                     _ => return missing(),
                 }
             } else {
-                return (vm.items.library_method)(vm, &dynamic, method, args, span);
+                return (vm.items.library_method)(vm, &dynamic, method, args.args, span);
             }
         }
 
@@ -174,13 +175,15 @@ pub fn call(
 pub fn call_mut(
     value: &mut Value,
     method: &str,
-    mut args: Args,
+    args: Args,
     span: Span,
 ) -> SourceResult<Value> {
     let name = value.type_name();
     let missing = || Err(missing_method(name, method)).at(span);
     let mut output = Value::None;
 
+    // we dont expect any sink here => num_pos_params = args.arc()
+    let mut args = ArgsAccessor::new(&args, args.argc());
     match value {
         Value::Array(array) => match method {
             "push" => array.push(args.expect("value")?),
@@ -211,12 +214,14 @@ pub fn call_mut(
 pub fn call_access<'a>(
     value: &'a mut Value,
     method: &str,
-    mut args: Args,
+    args: Args,
     span: Span,
 ) -> SourceResult<&'a mut Value> {
     let name = value.type_name();
     let missing = || Err(missing_method(name, method)).at(span);
 
+    // we dont expect any sink here => num_pos_params = args.arc()
+    let mut args = ArgsAccessor::new(&args, args.argc());
     let slot = match value {
         Value::Array(array) => match method {
             "first" => array.first_mut().at(span)?,

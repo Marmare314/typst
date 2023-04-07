@@ -469,7 +469,7 @@ fn create_construct_impl(element: &Elem) -> TokenStream {
         impl ::typst::model::Construct for #ident {
             fn construct(
                 vm: &mut ::typst::eval::Vm,
-                args: &mut ::typst::eval::Args,
+                args: &mut ::typst::eval::ArgsAccessor,
             ) -> ::typst::diag::SourceResult<::typst::model::Content> {
                 let mut element = Self(::typst::model::Content::new(
                     <Self as ::typst::model::Element>::func()
@@ -507,7 +507,7 @@ fn create_set_impl(element: &Elem) -> TokenStream {
     quote! {
         impl ::typst::model::Set for #ident {
             fn set(
-                args: &mut ::typst::eval::Args,
+                args: &mut ::typst::eval::ArgsAccessor,
             ) -> ::typst::diag::SourceResult<::typst::model::Styles> {
                 let mut styles = ::typst::model::Styles::new();
                 #(#handlers)*
